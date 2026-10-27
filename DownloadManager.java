@@ -119,6 +119,9 @@ public class DownloadManager extends JFrame implements Observer {
         if (verifiedUrl != null) {
             tableModel.addDownload(new Download(verifiedUrl));
             addTextField.setText("");
+            // otomatis pilih baris baru supaya tombol Pause/Cancel langsung aktif
+            int last = tableModel.getRowCount() - 1;
+            table.setRowSelectionInterval(last, last);
         } else {
             JOptionPane.showMessageDialog(this, "Format URL tidak valid!", "Error", JOptionPane.ERROR_MESSAGE);
         }

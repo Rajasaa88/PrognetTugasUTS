@@ -106,8 +106,11 @@ public class DownloadsTableModel extends AbstractTableModel implements Observer 
 
     @Override
     public void update(Observable o, Object arg) {
-        int index = downloadList.indexOf(o);
-        if (index >= 0) fireTableRowsUpdated(index, index);
+        // Download berjalan di thread lain, jadi update tabel harus lewat EDT
+        SwingUtilities.invokeLater(() -> {
+            int index = downloadList.indexOf(o);
+            if (index >= 0) fireTableRowsUpdated(index, index);
+        });
     }
 }
 

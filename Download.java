@@ -3,12 +3,14 @@ import java.net.*;
 import java.util.*;
 
 public class Download extends Observable implements Runnable {
-    private static final int MAX_BUFFER_SIZE = 1024;
+    private static final int MAX_BUFFER_SIZE = 8192;
+    private static final long NOTIFY_INTERVAL_MS = 100; // batasi frekuensi update UI
+
     public static final String[] STATUSES = {"Downloading", "Paused", "Complete", "Cancelled", "Error"};
     public static final int DOWNLOADING = 0, PAUSED = 1, COMPLETE = 2, CANCELLED = 3, ERROR = 4;
 
-    private URL url;
-    private int size, downloaded, status;
+    private final URL url;
+    private volatile int size, downloaded, status;
 
     public Download(URL url) {
         this.url = url;
@@ -20,7 +22,12 @@ public class Download extends Observable implements Runnable {
 
     public String getUrl() { return url.toString(); }
     public int getSize() { return size; }
-    public float getProgress() { return ((float) downloaded / size) * 100; }
+
+    public float getProgress() {
+        if (size <= 0) return 0f;
+        return ((float) downloaded / size) * 100;
+    }
+
     public int getStatus() { return status; }
     public void pause() { status = PAUSED; stateChanged(); }
     public void resume() { status = DOWNLOADING; stateChanged(); download(); }
@@ -29,14 +36,17 @@ public class Download extends Observable implements Runnable {
 
     private void download() {
         Thread thread = new Thread(this);
+        thread.setDaemon(true);
         thread.start();
     }
 
     private String getFileName(URL url) {
-        String fileName = url.getFile();
-        return fileName.substring(fileName.lastIndexOf('/') + 1);
+        String path = url.getPath();
+        String name = path.substring(path.lastIndexOf('/') + 1);
+        return name.isEmpty() ? "download.bin" : name;
     }
 
+    @Override
     public void run() {
         RandomAccessFile file = null;
         InputStream stream = null;
@@ -46,7 +56,11 @@ public class Download extends Observable implements Runnable {
             connection.setRequestProperty("Range", "bytes=" + downloaded + "-");
             connection.connect();
 
-            if (connection.getResponseCode() / 100 != 2) { error(); return; }
+            int code = connection.getResponseCode();
+            if (code / 100 != 2) { error(); return; }
+
+            // Jika server mengabaikan Range (balas 200), mulai ulang dari awal
+            if (code == HttpURLConnection.HTTP_OK) downloaded = 0;
 
             int contentLength = connection.getContentLength();
             if (contentLength < 1) { error(); return; }
@@ -60,19 +74,25 @@ public class Download extends Observable implements Runnable {
             file.seek(downloaded);
             stream = connection.getInputStream();
 
+            byte[] buffer = new byte[MAX_BUFFER_SIZE];
+            long lastNotify = 0;
             while (status == DOWNLOADING) {
-                byte[] buffer = new byte[MAX_BUFFER_SIZE];
                 int read = stream.read(buffer);
                 if (read == -1) break;
                 file.write(buffer, 0, read);
                 downloaded += read;
-                stateChanged();
+
+                long now = System.currentTimeMillis();
+                if (now - lastNotify >= NOTIFY_INTERVAL_MS) {
+                    lastNotify = now;
+                    stateChanged();
+                }
             }
 
             if (status == DOWNLOADING) {
                 status = COMPLETE;
-                stateChanged();
             }
+            stateChanged(); // update terakhir (progress & status final)
         } catch (Exception e) {
             error();
         } finally {
